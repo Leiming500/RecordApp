@@ -19,7 +19,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import com.example.recorddemo.ui.theme.RecordDemoTheme
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -115,22 +114,35 @@ class MainActivity : ComponentActivity() {
 
         thread {
             val buffer = ShortArray(bufferSize)
+            val twoSecSamples = sampleRate * 2  // 2秒对应的采样点数量
+            val tempBuffer = ShortArray(twoSecSamples)
+            var tempOffset = 0
+
             while (isRecording) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                 if (read > 0) {
-                    val pcmData = buffer.copyOf(read)
-                    updateLocation()
-                    val file = savePcmAsWav(pcmData, dir)
+                    // 把读取的数据复制到 tempBuffer
+                    var copied = 0
+                    while (copied < read) {
+                        val toCopy = minOf(read - copied, twoSecSamples - tempOffset)
+                        System.arraycopy(buffer, copied, tempBuffer, tempOffset, toCopy)
+                        tempOffset += toCopy
+                        copied += toCopy
 
-                    // 打印文件信息到控制台
-                    val fileSizeKb = file.length() / 1024
-                    println("文件生成成功: ${file.absolutePath}, 大小: ${fileSizeKb} KB, 格式: ${file.extension}")
+                        if (tempOffset >= twoSecSamples) {
+                            // 2 秒数据满了，保存文件
+                            updateLocation()  // 获取最新经纬度
+                            val lat = lastKnownLocation?.latitude ?: 0.0
+                            val lon = lastKnownLocation?.longitude ?: 0.0
 
-                    runOnUiThread {
-                        recordedFiles.add(file.absolutePath)
+                            val file = savePcmAsWav(tempBuffer, dir, lat, lon)
+                            runOnUiThread {
+                                recordedFiles.add(file.absolutePath)
+                            }
+                            tempOffset = 0  // 重置
+                        }
                     }
                 }
-                Thread.sleep(2000) // 每2秒切分一次
             }
         }
     }
@@ -146,10 +158,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun savePcmAsWav(pcmData: ShortArray, dir: File): File {
+    private fun savePcmAsWav(pcmData: ShortArray, dir: File, lat: Double, lon: Double): File {
         val timestamp = System.currentTimeMillis()
-        val lat = lastKnownLocation?.latitude ?: 0.0
-        val lon = lastKnownLocation?.longitude ?: 0.0
         val fileName = "record_${timestamp}_${lat}_${lon}.wav"
         val file = File(dir, fileName)
 
@@ -159,7 +169,6 @@ class MainActivity : ComponentActivity() {
 
         FileOutputStream(file).use { fos ->
             val totalDataLen = byteBuffer.capacity() + 36
-            val byteRate = 16 * sampleRate / 8
             val header = ByteArray(44)
             System.arraycopy("RIFF".toByteArray(), 0, header, 0, 4)
             header[4] = (totalDataLen and 0xff).toByte()
@@ -175,7 +184,7 @@ class MainActivity : ComponentActivity() {
             header[25] = ((sampleRate shr 8) and 0xff).toByte()
             header[26] = ((sampleRate shr 16) and 0xff).toByte()
             header[27] = ((sampleRate shr 24) and 0xff).toByte()
-            header[28] = (2).toByte()
+            header[28] = 2
             header[34] = 16
             System.arraycopy("data".toByteArray(), 0, header, 36, 4)
             val dataLen = byteBuffer.capacity()
