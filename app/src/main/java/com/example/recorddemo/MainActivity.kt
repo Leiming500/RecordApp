@@ -7,7 +7,6 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -122,6 +121,11 @@ class MainActivity : ComponentActivity() {
                     val pcmData = buffer.copyOf(read)
                     updateLocation()
                     val file = savePcmAsWav(pcmData, dir)
+
+                    // 打印文件信息到控制台
+                    val fileSizeKb = file.length() / 1024
+                    println("文件生成成功: ${file.absolutePath}, 大小: ${fileSizeKb} KB, 格式: ${file.extension}")
+
                     runOnUiThread {
                         recordedFiles.add(file.absolutePath)
                     }
@@ -154,7 +158,6 @@ class MainActivity : ComponentActivity() {
         pcmData.forEach { byteBuffer.putShort(it) }
 
         FileOutputStream(file).use { fos ->
-            // 写 WAV header
             val totalDataLen = byteBuffer.capacity() + 36
             val byteRate = 16 * sampleRate / 8
             val header = ByteArray(44)
@@ -172,11 +175,7 @@ class MainActivity : ComponentActivity() {
             header[25] = ((sampleRate shr 8) and 0xff).toByte()
             header[26] = ((sampleRate shr 16) and 0xff).toByte()
             header[27] = ((sampleRate shr 24) and 0xff).toByte()
-            header[28] = (byteRate and 0xff).toByte()
-            header[29] = ((byteRate shr 8) and 0xff).toByte()
-            header[30] = ((byteRate shr 16) and 0xff).toByte()
-            header[31] = ((byteRate shr 24) and 0xff).toByte()
-            header[32] = (2).toByte()
+            header[28] = (2).toByte()
             header[34] = 16
             System.arraycopy("data".toByteArray(), 0, header, 36, 4)
             val dataLen = byteBuffer.capacity()
