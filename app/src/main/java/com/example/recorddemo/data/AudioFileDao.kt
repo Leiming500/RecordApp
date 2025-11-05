@@ -15,6 +15,9 @@ interface AudioFileDao {
     @Update
     suspend fun update(audioFile: AudioFile)
 
+    @Query("SELECT * FROM audio_files ORDER BY createdAt DESC")
+    fun getAllFilesFlow(): Flow<List<AudioFile>>
+
     @Delete
     suspend fun delete(audioFile: AudioFile)
 }

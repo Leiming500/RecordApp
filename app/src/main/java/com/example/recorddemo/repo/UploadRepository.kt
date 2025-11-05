@@ -4,69 +4,114 @@ import android.util.Log
 import com.example.recorddemo.data.AudioFile
 import com.example.recorddemo.data.AudioFileDao
 import com.example.recorddemo.network.ApiService
-import kotlinx.coroutines.delay
-import okhttp3.MediaType.Companion.toMediaType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.File
-import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.*
 
 class UploadRepository(
     private val api: ApiService,
     private val dao: AudioFileDao
 ) {
+
     companion object {
         private const val TAG = "UploadRepository"
     }
 
-    /**
-     * 上传单个文件，最多重试 maxRetries 次，失败会更新 dao 的 lastError 与 uploadAttempts。
-     * 返回 true 表示上传成功。
-     */
-    suspend fun uploadWithRetry(entity: AudioFile, maxRetries: Int = 3): Boolean {
+    suspend fun uploadWithRetry(audioFile: AudioFile, maxRetries: Int = 3): Boolean {
         var attempt = 0
-        var lastThrowable: Throwable? = null
+        var success = false
 
-        while (attempt < maxRetries) {
+        while (attempt < maxRetries && !success) {
             attempt++
             try {
-                val f = File(entity.filePath)
-                if (!f.exists()) {
-                    // 标记为已上传（或删除记录），这里先设为 uploaded = true 并返回 false
-                    dao.update(entity.copy(uploaded = true, lastError = "file_missing"))
-                    return false
-                }
-
-                val reqBody = f.asRequestBody("audio/wav".toMediaType())
-                val part = MultipartBody.Part.createFormData("audio", entity.fileName, reqBody)
-
-                // metadata: JSON string or any format your backend expects
-                val metaJson = """{"fileName":"${entity.fileName}","lat":${entity.latitude},"lon":${entity.longitude},"ts":${entity.createdAt}}"""
-                val metaBody = metaJson.toRequestBody("application/json".toMediaType())
-
-                val resp = api.uploadAudio(part, metaBody)
-                if (resp.isSuccessful) {
-                    // 上传成功，更新 DB
-                    dao.update(entity.copy(uploaded = true, uploadAttempts = attempt, lastError = null))
-                    return true
-                } else {
-                    val err = "http_${resp.code()}:${resp.message()}"
-                    dao.update(entity.copy(uploadAttempts = attempt, lastError = err))
-                    lastThrowable = IOException(err)
-                }
-            } catch (t: Throwable) {
-                lastThrowable = t
-                dao.update(entity.copy(uploadAttempts = attempt, lastError = t.message))
-                Log.w(TAG, "upload attempt $attempt failed: ${t.message}")
+                success = uploadFile(audioFile)
+            } catch (e: Exception) {
+                Log.e(TAG, "Upload attempt $attempt failed: ${e.message}", e)
+                dao.update(audioFile.copy(
+                    uploadAttempts = audioFile.uploadAttempts + 1,
+                    lastError = e.message
+                ))
             }
-
-            delay(1000L * attempt) // 指数退避：1s,2s,3s...
         }
 
-        // 最终失败
-        Log.e(TAG, "upload failed after $attempt attempts", lastThrowable)
-        return false
+        return success
+    }
+
+    private suspend fun uploadFile(audioFile: AudioFile): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val file = File(audioFile.filePath)
+            if (!file.exists()) {
+                Log.w(TAG, "File not found: ${audioFile.filePath}")
+                dao.update(audioFile.copy(
+                    uploaded = false,
+                    lastError = "File not found"
+                ))
+                return@withContext false
+            }
+
+            // ---- Prepare multipart body ----
+            val filePart = MultipartBody.Part.createFormData(
+                "file",
+                file.name,
+                file.asRequestBody("audio/wav".toMediaTypeOrNull())
+            )
+
+            // Metadata JSON
+            val timestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date(audioFile.createdAt))
+            val metaJson = JSONObject().apply {
+                put("id", audioFile.id)
+                put("lat", audioFile.latitude)
+                put("lng", audioFile.longitude)
+                put("fault_level", JSONObject.NULL)
+                put("confidence", JSONObject.NULL)
+                put("description", audioFile.fileName)
+                put("captured_at", timestamp)
+                put("belt_id", JSONObject.NULL)
+                put("section_id", JSONObject.NULL)
+            }
+
+            val metadataBody: RequestBody = RequestBody.create(
+                "application/json".toMediaTypeOrNull(),
+                metaJson.toString()
+            )
+
+            // ---- Make request ----
+            val response = api.uploadAudio(filePart, metadataBody)
+
+            if (response.isSuccessful) {
+                Log.i(TAG, "✅ Uploaded successfully: ${audioFile.fileName}")
+
+                dao.update(audioFile.copy(
+                    uploaded = true,
+                    uploadAttempts = audioFile.uploadAttempts + 1,
+                    lastError = null
+                ))
+                return@withContext true
+            } else {
+                Log.w(TAG, "❌ Server responded with ${response.code()}")
+                dao.update(audioFile.copy(
+                    uploaded = false,
+                    uploadAttempts = audioFile.uploadAttempts + 1,
+                    lastError = "HTTP ${response.code()}"
+                ))
+                return@withContext false
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Upload error: ${e.message}", e)
+            dao.update(audioFile.copy(
+                uploaded = false,
+                uploadAttempts = audioFile.uploadAttempts + 1,
+                lastError = e.message
+            ))
+            return@withContext false
+        }
     }
 }
