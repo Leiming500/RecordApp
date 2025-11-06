@@ -66,10 +66,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         db = AppDatabase.getDatabase(this)
 
+        // ✅ Base URL fixed — must end with slash
         val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
         val client = OkHttpClient.Builder().addInterceptor(logging).build()
         val retrofit = Retrofit.Builder()
-            .baseUrl("http://3.105.95.17:8000/api/v1/ingest/audio")
+            .baseUrl("http://3.105.95.17:8000/") // <-- fixed
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
@@ -119,6 +120,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // 🎧 Recording logic kept 100% same
     private fun startRecording() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "Microphone permission required", Toast.LENGTH_LONG).show()
@@ -185,7 +187,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** ✅ Full WAV header version (restored) **/
+    // 🎵 Full WAV save logic unchanged
     private fun savePcmAsWav(pcmData: ShortArray, dir: File, lat: Double, lon: Double): File {
         val timestamp = System.currentTimeMillis()
         val fileName = "rec_${timestamp}_${lat}_${lon}.wav"
@@ -205,12 +207,10 @@ class MainActivity : ComponentActivity() {
 
         FileOutputStream(file).use { fos ->
             val header = ByteArray(44)
-            // RIFF header
             header[0] = 'R'.code.toByte()
             header[1] = 'I'.code.toByte()
             header[2] = 'F'.code.toByte()
             header[3] = 'F'.code.toByte()
-            // file size minus 8 bytes
             header[4] = (totalDataLen and 0xff).toByte()
             header[5] = ((totalDataLen shr 8) and 0xff).toByte()
             header[6] = ((totalDataLen shr 16) and 0xff).toByte()
@@ -219,42 +219,31 @@ class MainActivity : ComponentActivity() {
             header[9] = 'A'.code.toByte()
             header[10] = 'V'.code.toByte()
             header[11] = 'E'.code.toByte()
-            // fmt chunk
             header[12] = 'f'.code.toByte()
             header[13] = 'm'.code.toByte()
             header[14] = 't'.code.toByte()
             header[15] = ' '.code.toByte()
-            // Subchunk1Size (16 for PCM)
             header[16] = 16
-            // AudioFormat (1 = PCM)
             header[20] = 1
-            // NumChannels
             header[22] = channels.toByte()
-            // SampleRate
             header[24] = (sampleRate and 0xff).toByte()
             header[25] = ((sampleRate shr 8) and 0xff).toByte()
             header[26] = ((sampleRate shr 16) and 0xff).toByte()
             header[27] = ((sampleRate shr 24) and 0xff).toByte()
-            // ByteRate
             header[28] = (byteRate and 0xff).toByte()
             header[29] = ((byteRate shr 8) and 0xff).toByte()
             header[30] = ((byteRate shr 16) and 0xff).toByte()
             header[31] = ((byteRate shr 24) and 0xff).toByte()
-            // BlockAlign = NumChannels * BitsPerSample/8
             header[32] = (channels * bitsPerSample / 8).toByte()
-            // BitsPerSample
             header[34] = bitsPerSample.toByte()
-            // data subchunk
             header[36] = 'd'.code.toByte()
             header[37] = 'a'.code.toByte()
             header[38] = 't'.code.toByte()
             header[39] = 'a'.code.toByte()
-            // Subchunk2Size (dataLen)
             header[40] = (dataLen and 0xff).toByte()
             header[41] = ((dataLen shr 8) and 0xff).toByte()
             header[42] = ((dataLen shr 16) and 0xff).toByte()
             header[43] = ((dataLen shr 24) and 0xff).toByte()
-
             fos.write(header)
             fos.write(pcmBytes)
             fos.flush()
@@ -267,6 +256,7 @@ class MainActivity : ComponentActivity() {
             db.audioFileDao().getPendingUploadsFlow().collectLatest { list ->
                 for (entity in list) {
                     val success = uploadRepo.uploadWithRetry(entity, maxRetries = 3)
+                    Log.d(TAG, "Upload ${if (success) "succeeded" else "failed"} for ${entity.fileName}")
                     if (success) File(entity.filePath).delete()
                 }
             }
@@ -281,6 +271,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// 🎨 Compose UI: three colored buttons for filtering
 @Composable
 fun RecordScreen(files: List<AudioFile>, onStartStopRecording: () -> Unit) {
     var isRecording by remember { mutableStateOf(false) }
