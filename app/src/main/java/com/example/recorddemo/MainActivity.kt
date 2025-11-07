@@ -280,14 +280,16 @@ fun RecordScreen(
     files: List<AudioFile>,
     onStartStopRecording: () -> Unit
 ) {
-    // ✅ 这些都用显式 .value，避免 by 委托引发的报错
+    //
+
     val isRecordingState = remember { mutableStateOf(false) }
     val selectedFilterState = remember { mutableStateOf("Uploading") }
 
     val showErrorDialogState = remember { mutableStateOf(false) }
     val currentErrorTextState = remember { mutableStateOf("") }
     val currentFileState = remember { mutableStateOf<AudioFile?>(null) }
-    val retryingInDialogState = remember { mutableStateOf(false) }  // ← 你报错的这个
+    val retryingInDialogState = remember { mutableStateOf(false) }
+
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -440,11 +442,25 @@ fun RecordScreen(
                                             }
                                         }
                                     },
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF757575))
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF8BC34A),
+                                        contentColor = Color.White,
+                                        disabledContainerColor = Color(0xFF90CAF9),
+                                        disabledContentColor = Color.White.copy(alpha = 0.7f)
+                                    ),
+                                    elevation = ButtonDefaults.buttonElevation(
+                                        defaultElevation = 4.dp,
+                                        pressedElevation = 8.dp
+                                    )
                                 ) {
-                                    Text("Retry", color = Color.White)
+                                    Text(
+                                        text = "Retry",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White
+                                    )
                                 }
+
                             }
                         }
                     }
