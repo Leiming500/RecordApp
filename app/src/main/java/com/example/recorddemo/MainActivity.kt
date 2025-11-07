@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.recorddemo.data.AppDatabase
@@ -61,6 +63,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var db: AppDatabase
     private lateinit var uploadRepo: UploadRepository
     private val ioScope = CoroutineScope(Executors.newSingleThreadExecutor().asCoroutineDispatcher() + SupervisorJob())
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -273,15 +276,27 @@ class MainActivity : ComponentActivity() {
 
 // 🎨 Compose UI: three colored buttons for filtering
 @Composable
-fun RecordScreen(files: List<AudioFile>, onStartStopRecording: () -> Unit) {
-    var isRecording by remember { mutableStateOf(false) }
-    var selectedFilter by remember { mutableStateOf("Uploading") }
+fun RecordScreen(
+    files: List<AudioFile>,
+    onStartStopRecording: () -> Unit
+) {
+    // ✅ 这些都用显式 .value，避免 by 委托引发的报错
+    val isRecordingState = remember { mutableStateOf(false) }
+    val selectedFilterState = remember { mutableStateOf("Uploading") }
 
-    val filteredFiles = remember(files, selectedFilter) {
-        when (selectedFilter) {
+    val showErrorDialogState = remember { mutableStateOf(false) }
+    val currentErrorTextState = remember { mutableStateOf("") }
+    val currentFileState = remember { mutableStateOf<AudioFile?>(null) }
+    val retryingInDialogState = remember { mutableStateOf(false) }  // ← 你报错的这个
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val filteredFiles = remember(files, selectedFilterState.value) {
+        when (selectedFilterState.value) {
             "Uploaded" -> files.filter { it.uploaded }
-            "Failed" -> files.filter { !it.uploaded && it.lastError != null }
-            else -> files.filter { !it.uploaded && it.lastError == null }
+            "Failed"   -> files.filter { !it.uploaded && it.lastError != null }
+            else       -> files.filter { !it.uploaded && it.lastError == null }
         }
     }
 
@@ -292,30 +307,217 @@ fun RecordScreen(files: List<AudioFile>, onStartStopRecording: () -> Unit) {
         Button(
             onClick = {
                 onStartStopRecording()
-                isRecording = !isRecording
+                isRecordingState.value = !isRecordingState.value
             },
             modifier = Modifier.fillMaxWidth().height(56.dp)
         ) {
-            Text(if (isRecording) "Stop Recording" else "Start Recording")
+            Text(if (isRecordingState.value) "Stop Recording" else "Start Recording")
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(Modifier.height(12.dp))
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            FilterButton("Uploading", selectedFilter, Color(0xFFFFC107)) { selectedFilter = "Uploading" }
-            FilterButton("Uploaded", selectedFilter, Color(0xFF4CAF50)) { selectedFilter = "Uploaded" }
-            FilterButton("Failed", selectedFilter, Color(0xFFF44336)) { selectedFilter = "Failed" }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            FilterButton("Uploading", selectedFilterState.value, Color(0xFFFFC107)) { selectedFilterState.value = "Uploading" }
+            FilterButton("Uploaded",  selectedFilterState.value, Color(0xFF4CAF50)) { selectedFilterState.value = "Uploaded" }
+            FilterButton("Failed",    selectedFilterState.value, Color(0xFFF44336)) { selectedFilterState.value = "Failed" }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(Modifier.height(12.dp))
 
         LazyColumn(modifier = Modifier.fillMaxWidth()) {
             items(filteredFiles) { file ->
-                Text(file.fileName, modifier = Modifier.padding(8.dp))
+                // ⬛ 1️⃣ 上传中 (Uploading)
+                if (!file.uploaded && file.lastError == null) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp, horizontal = 8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4)), // 淡黄色
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(
+                                text = file.fileName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.Black
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Uploading...",
+                                    color = Color(0xFFFFA000),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color(0xFFFFA000)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 🟩 2️⃣ 已上传 (Uploaded)
+                else if (file.uploaded) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp, horizontal = 8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)), // 淡绿色
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(
+                                text = file.fileName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.Black
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "Uploaded successfully ✅",
+                                color = Color(0xFF388E3C),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+
+                // 🟥 3️⃣ 上传失败 (Failed)
+                else if (!file.uploaded && file.lastError != null) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp, horizontal = 8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)), // 淡红色
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = file.fileName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.Black
+                            )
+
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = file.lastError ?: "Unknown error",
+                                color = Color.Red,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier
+                                    .clickable {
+                                        currentErrorTextState.value = file.lastError ?: ""
+                                        currentFileState.value = file
+                                        showErrorDialogState.value = true
+                                    }
+                                    .padding(bottom = 6.dp)
+                            )
+
+                            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                                Button(
+                                    onClick = {
+                                        selectedFilterState.value = "Uploading"
+                                        scope.launch(Dispatchers.IO) {
+                                            val success = UploadRepository(
+                                                RetrofitClient.instance,
+                                                AppDatabase.getDatabase(context).audioFileDao()
+                                            ).uploadWithRetry(file, maxRetries = 3)
+
+                                            withContext(Dispatchers.Main) {
+                                                Toast.makeText(
+                                                    context,
+                                                    if (success) "Retry Success!" else "Retry Failed!",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF757575))
+                                ) {
+                                    Text("Retry", color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        }
+
+        // 🔔
+        if (showErrorDialogState.value) {
+            AlertDialog(
+                onDismissRequest = { if (!retryingInDialogState.value) showErrorDialogState.value = false },
+                title = { Text("Upload Error Detail") },
+                text = {
+                    Column {
+                        Text(
+                            currentErrorTextState.value,
+                            color = Color.DarkGray,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        if (retryingInDialogState.value) {
+                            Spacer(Modifier.height(12.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Retrying…")
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = {
+                                val file = currentFileState.value ?: return@Button
+                                showErrorDialogState.value = false
+                                selectedFilterState.value = "Uploading"
+                                retryingInDialogState.value = true
+                                scope.launch(Dispatchers.IO) {
+                                    val success = UploadRepository(
+                                        RetrofitClient.instance,
+                                        AppDatabase.getDatabase(context).audioFileDao()
+                                    ).uploadWithRetry(file, maxRetries = 3)
+
+                                    withContext(Dispatchers.Main) {
+                                        retryingInDialogState.value = false
+                                        Toast.makeText(
+                                            context,
+                                            if (success) "Retry Success!" else "Retry Failed!",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            },
+                            enabled = !retryingInDialogState.value,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                        ) { Text("Retry") }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        Button(
+                            onClick = { showErrorDialogState.value = false },
+                            enabled = !retryingInDialogState.value
+                        ) { Text("OK") }
+                    }
+                },
+                containerColor = Color(0xFFF5F5F5),
+                tonalElevation = 8.dp
+            )
         }
     }
 }
+
+
 
 @Composable
 fun FilterButton(label: String, selected: String, color: Color, onClick: () -> Unit) {
