@@ -89,6 +89,8 @@ class MainActivity : ComponentActivity() {
                 RecordScreen(files = allFiles, onStartStopRecording = { toggleRecording() })
             }
         }
+
+
     }
 
     private fun requestPermissions() {
@@ -381,7 +383,7 @@ fun RecordScreen(
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                text = "Uploaded successfully ✅",
+                                text = "Uploaded successfully",
                                 color = Color(0xFF388E3C),
                                 style = MaterialTheme.typography.bodySmall
                             )
