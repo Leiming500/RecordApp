@@ -7,7 +7,7 @@
 
 
     object RetrofitClient {
-        private const val BASE_URL = "https://your-server.com/api/"
+        private const val BASE_URL = ""
 
         private val loggingInterceptor = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
