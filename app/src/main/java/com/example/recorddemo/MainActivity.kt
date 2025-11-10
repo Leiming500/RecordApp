@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
         val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
         val client = OkHttpClient.Builder().addInterceptor(logging).build()
         val retrofit = Retrofit.Builder()
-            .baseUrl("http://3.105.95.17:8000/") // <-- fixed
+            .baseUrl("http://3.105.95.17:8000/")
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()

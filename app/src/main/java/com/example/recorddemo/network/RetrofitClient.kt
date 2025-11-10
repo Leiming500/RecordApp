@@ -7,10 +7,10 @@
 
 
     object RetrofitClient {
-        private const val BASE_URL = "https://your-server.com/api/"  // 🔹替换成你的服务器地址
+        private const val BASE_URL = "https://your-server.com/api/"
 
         private val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY  // 打印详细请求日志
+            level = HttpLoggingInterceptor.Level.BODY
         }
 
         private val okHttpClient = OkHttpClient.Builder()
