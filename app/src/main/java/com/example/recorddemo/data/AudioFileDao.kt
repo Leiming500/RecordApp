@@ -21,4 +21,6 @@ interface AudioFileDao {
     @Delete
     suspend fun delete(audioFile: AudioFile)
 
+    @Query("UPDATE audio_files SET uploaded = 1, lastError = null WHERE uploaded = 0")
+    suspend fun markAllPendingUploaded(): Int
 }

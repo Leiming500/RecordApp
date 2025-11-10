@@ -83,13 +83,21 @@ class MainActivity : ComponentActivity() {
         requestPermissions()
         observePendingUploads()
 
+//        ioScope.launch {
+//            val updated = db.audioFileDao().markAllPendingUploaded()
+//            Log.d("MainActivity", "✅ Updated $updated records to uploaded = true")
+//        }
         setContent {
             RecordDemoTheme {
                 val allFiles by db.audioFileDao().getAllFilesFlow().collectAsState(initial = emptyList())
-                RecordScreen(files = allFiles, onStartStopRecording = { toggleRecording() })
+                RecordScreen(
+                    files = allFiles,
+                    onStartStopRecording = { toggleRecording() },
+                    retrofitApi = api,
+                    db = db
+                )
             }
         }
-
 
     }
 
@@ -280,7 +288,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun RecordScreen(
     files: List<AudioFile>,
-    onStartStopRecording: () -> Unit
+    onStartStopRecording: () -> Unit,
+    retrofitApi: ApiService,
+    db: AppDatabase
 ) {
     //
 
@@ -294,7 +304,9 @@ fun RecordScreen(
 
 
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope() + CoroutineExceptionHandler { _, e ->
+        Log.e("RecordScreen", "Coroutine error: ${e.message}", e)
+    }
 
     val filteredFiles = remember(files, selectedFilterState.value) {
         when (selectedFilterState.value) {
@@ -425,45 +437,7 @@ fun RecordScreen(
                                     .padding(bottom = 6.dp)
                             )
 
-                            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                                Button(
-                                    onClick = {
-                                        selectedFilterState.value = "Uploading"
-                                        scope.launch(Dispatchers.IO) {
-                                            val success = UploadRepository(
-                                                RetrofitClient.instance,
-                                                AppDatabase.getDatabase(context).audioFileDao()
-                                            ).uploadWithRetry(file, maxRetries = 3)
 
-                                            withContext(Dispatchers.Main) {
-                                                Toast.makeText(
-                                                    context,
-                                                    if (success) "Retry Success!" else "Retry Failed!",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF8BC34A),
-                                        contentColor = Color.White,
-                                        disabledContainerColor = Color(0xFF90CAF9),
-                                        disabledContentColor = Color.White.copy(alpha = 0.7f)
-                                    ),
-                                    elevation = ButtonDefaults.buttonElevation(
-                                        defaultElevation = 4.dp,
-                                        pressedElevation = 8.dp
-                                    )
-                                ) {
-                                    Text(
-                                        text = "Retry",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = Color.White
-                                    )
-                                }
-
-                            }
                         }
                     }
                 }
@@ -497,14 +471,28 @@ fun RecordScreen(
                         Button(
                             onClick = {
                                 val file = currentFileState.value ?: return@Button
+
+
+                                if (!File(file.filePath).exists()) {
+                                    Toast.makeText(context, "File not found on device", Toast.LENGTH_SHORT).show()
+                                    showErrorDialogState.value = false
+                                    return@Button
+                                }
+
+                                // 🔹 Step 2: UI
                                 showErrorDialogState.value = false
                                 selectedFilterState.value = "Uploading"
                                 retryingInDialogState.value = true
+
+
                                 scope.launch(Dispatchers.IO) {
-                                    val success = UploadRepository(
-                                        RetrofitClient.instance,
-                                        AppDatabase.getDatabase(context).audioFileDao()
-                                    ).uploadWithRetry(file, maxRetries = 3)
+                                    val success = try {
+                                        UploadRepository(retrofitApi, db.audioFileDao())
+                                            .uploadWithRetry(file, maxRetries = 3)
+                                    } catch (e: Exception) {
+                                        Log.e("Retry", "Error: ${e.message}", e)
+                                        false
+                                    }
 
                                     withContext(Dispatchers.Main) {
                                         retryingInDialogState.value = false
@@ -515,7 +503,8 @@ fun RecordScreen(
                                         ).show()
                                     }
                                 }
-                            },
+                            }
+                            ,
                             enabled = !retryingInDialogState.value,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
                         ) { Text("Retry") }

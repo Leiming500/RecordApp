@@ -43,7 +43,6 @@ class UploadRepository(
 
         return success
     }
-
     private suspend fun uploadFile(audioFile: AudioFile): Boolean = withContext(Dispatchers.IO) {
         try {
             val file = File(audioFile.filePath)
@@ -56,62 +55,54 @@ class UploadRepository(
                 return@withContext false
             }
 
-            // ---- Prepare multipart body ----
             val filePart = MultipartBody.Part.createFormData(
                 "file",
                 file.name,
                 file.asRequestBody("audio/wav".toMediaTypeOrNull())
             )
 
-            // Metadata JSON
-            val timestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date(audioFile.createdAt))
-            val metaJson = JSONObject().apply {
-                put("id", audioFile.id)
-                put("lat", audioFile.latitude)
-                put("lng", audioFile.longitude)
-                put("fault_level", JSONObject.NULL)
-                put("confidence", JSONObject.NULL)
-                put("description", audioFile.fileName)
-                put("captured_at", timestamp)
-                put("belt_id", JSONObject.NULL)
-                put("section_id", JSONObject.NULL)
-            }
 
-            val metadataBody: RequestBody = RequestBody.create(
-                "application/json".toMediaTypeOrNull(),
-                metaJson.toString()
-            )
+            val sensorId = RequestBody.create("text/plain".toMediaTypeOrNull(), "Sensor_001")
+            val level = RequestBody.create("text/plain".toMediaTypeOrNull(), "normal")
+            val lat = RequestBody.create("text/plain".toMediaTypeOrNull(), audioFile.latitude.toString())
+            val lon = RequestBody.create("text/plain".toMediaTypeOrNull(), audioFile.longitude.toString())
+            val note = RequestBody.create("text/plain".toMediaTypeOrNull(), audioFile.fileName)
 
-            // ---- Make request ----
-            val response = api.uploadAudio(filePart, metadataBody)
+
+            val response = api.uploadAudio(sensorId, level, lat, lon, note, filePart)
 
             if (response.isSuccessful) {
                 Log.i(TAG, "✅ Uploaded successfully: ${audioFile.fileName}")
-
-                dao.update(audioFile.copy(
-                    uploaded = true,
-                    uploadAttempts = audioFile.uploadAttempts + 1,
-                    lastError = null
-                ))
-                return@withContext true
+                dao.update(
+                    audioFile.copy(
+                        uploaded = true,
+                        uploadAttempts = audioFile.uploadAttempts + 1,
+                        lastError = null
+                    )
+                )
+                true
             } else {
                 Log.w(TAG, "❌ Server responded with ${response.code()}")
-                dao.update(audioFile.copy(
-                    uploaded = false,
-                    uploadAttempts = audioFile.uploadAttempts + 1,
-                    lastError = "HTTP ${response.code()}"
-                ))
-                return@withContext false
+                dao.update(
+                    audioFile.copy(
+                        uploaded = false,
+                        uploadAttempts = audioFile.uploadAttempts + 1,
+                        lastError = "HTTP ${response.code()}"
+                    )
+                )
+                false
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "Upload error: ${e.message}", e)
-            dao.update(audioFile.copy(
-                uploaded = false,
-                uploadAttempts = audioFile.uploadAttempts + 1,
-                lastError = e.message
-            ))
-            return@withContext false
+            dao.update(
+                audioFile.copy(
+                    uploaded = false,
+                    uploadAttempts = audioFile.uploadAttempts + 1,
+                    lastError = e.message
+                )
+            )
+            false
         }
     }
 }
